@@ -4,6 +4,11 @@ import sys
 import os
 sys.path.append( '/srv/http/data/system' )
 from lcdcharconf import *
+from camilladsp import CamillaConnection
+
+
+cdsp = CamillaConnection("127.0.0.1",1234)
+cdsp.connect()
 
 rows = cols == 16 and 2 or 4
 
@@ -181,7 +186,7 @@ else:
 hhmmss = Time and second2hhmmss( round( float( Time ) ) ) or ''
 
 if state == 'stop':
-    progress = ( hhmmss + ' ' * cols )[ :cols - 4 ]
+    progress = ( hhmmss + ' ' * cols )[ :cols - 7 ]
 else:
     if elapsed is False: # can be 0
         elapsedhhmmss = ''
@@ -189,26 +194,38 @@ else:
     else:
         elapsed = round( float( elapsed ) )
         elapsedhhmmss = second2hhmmss( elapsed )
-        slash = cols > 16 and ' / ' or '/'
+        slash = cols > 16 and '/' or '/'
     if Time: hhmmss = slash + hhmmss
-    progress = ( elapsedhhmmss + hhmmss + ' ' * cols )[ :cols - 4 ]
+    progress = ( elapsedhhmmss + hhmmss + ' ' * cols )[ :cols - 7 ]
 
-lcd.write_string( lines + RN + ICON[ state ] + progress + RA )
+Volume = round(cdsp.get_volume())
+
+lcd.write_string( lines + RN + ICON[ state ] + progress + str(Volume) + 'dB' )
 
 if backlight and state != 'play': backlightOff()
 
-if state != 'play': sys.exit()
+#if state != 'play': sys.exit()
+if state == 'play':
 
-row = rows - 1
-starttime = time.time()
-elapsed += round( starttime - timestamp / 1000 )
-PLAY = ICON[ 'play' ]
+    row = rows - 1
+    starttime = time.time()
+    elapsed += round( starttime - timestamp / 1000 )
+    PLAY = ICON[ 'play' ]
 
-while True:
-    sl = 1 - ( ( time.time() - starttime ) % 1 )
-    lcd.cursor_pos = ( row, 0 )
-    elapsedhhmmss = second2hhmmss( elapsed )
-    lcd.write_string( PLAY + elapsedhhmmss + hhmmss )
-    elapsed += 1
-    time.sleep( sl )
+    while True:
+        sl = 1 - ( ( time.time() - starttime ) % 1 )
+        lcd.cursor_pos = ( row, 0 )
+        elapsedhhmmss = second2hhmmss( elapsed )
+        progress = ( elapsedhhmmss + hhmmss + ' ' * cols )[ :cols - 7 ]
+        #lcd.write_string( PLAY + elapsedhhmmss + hhmmss )
+        Volume = round(cdsp.get_volume())
+        lcd.write_string( PLAY + progress + str(Volume) + 'dB')
+        elapsed += 1
+        time.sleep( sl )
+else:
+
+    while True:
+        Volume = round(cdsp.get_volume())
+        lcd.write_string( lines + RN + ICON[ state ] + progress + str(Volume) + 'dB' )
+        time.sleep( 1 )
     
