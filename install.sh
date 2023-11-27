@@ -4,6 +4,39 @@ alias=r1
 
 . /srv/http/bash/settings/addons.sh
 
+# 20231125
+grep -q connect $dirbash/websocket-server.py && websocketrestart=1
+
+file=$dirmpdconf/conf/camilladsp.conf
+if [[ -e /usr/bin/camilladsp && ! -e $file ]]; then
+	echo 'audio_output {
+	name           "CamillaDSP"
+	device         "hw:Loopback,1"
+	type           "alsa"
+	auto_resample  "no"
+	mixer_type     "none"
+}' > $file
+	echo 'include_optional    "camilladsp.conf"' >> $dirmpdconf/mpd.conf
+	[[ -e $dirsystem/camilladsp ]] && mpdrestart=1
+fi
+
+file=/etc/systemd/system/cava.service
+if [[ ! -e $file ]]; then
+	echo '[Unit]
+Description=VU level for VU LED and VU meter
+
+[Service]
+ExecStart=/srv/http/bash/cava.sh
+ExecStop=/srv/http/bash/cava.sh stop' > $file
+	systemctl daemon-reload
+	[[ -e $dirsystem/vuled ]] && killall -9 cava &> /dev/null && rm $dirsystem/vuled
+fi
+
+if [[ ! -e /lib/libfdt.so ]]; then
+	pacman -Sy --noconfirm dtc
+	systemctl try-restart rotaryencoder
+fi
+
 # 20231118
 grep -q dhcpcd /etc/pacman.conf && sed -i -E 's/(IgnorePkg   =).*/#\1/' /etc/pacman.conf
 
@@ -62,7 +95,7 @@ if ! grep -q plclear $file; then
 ' $file
 fi
 
-if [[ ! -e $dirsystem/localbrowser.conf ]]; then
+if [[ ! -e /boot/kernel.img && ! -e $dirsystem/localbrowser.conf ]]; then
 	echo "\
 rotate=0
 zoom=100
@@ -85,6 +118,10 @@ cacheBust
 [[ -e $dirsystem/color ]] && $dirbash/cmd.sh color
 
 installfinish
+
+# 20231125
+[[ $websocketrestart ]] && systemctl restart websocket
+[[ $mpdrestart ]] && $dirsettings/player-conf.sh
 
 # 20231013
 if ! grep -q smbdfree /etc/samba/smb.conf; then
