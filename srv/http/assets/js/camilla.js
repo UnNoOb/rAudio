@@ -314,6 +314,20 @@ function psOnClose() {
 	if ( wscamilla ) wscamilla.close();
 	$( '#divstate .label' ).html( 'Buffer · Sampling' );
 }
+function playbackButton() {
+	var play = S.state === 'play';
+	if ( S.player === 'mpd' ) {
+		if ( S.pllength ) {
+			var btn = play ? 'pause' : 'play';
+		} else {
+			var btn = 'play disabled';
+		}
+	} else {
+		var btn = play ? 'stop' : 'play disabled';
+	}
+	$( '.icon' ).prop( 'class', 'icon i-'+ S.player );
+	$( '.playback' ).prop( 'class', 'playback i-'+ btn );
+}
 function psVolume( data ) {
 	var vol = data.val;
 	if ( [ 'mute', 'unmute' ].includes( data.type ) ) {
@@ -524,7 +538,11 @@ var render   = {
 		if ( DEV.enable_rate_adjust ) V.statusget.push( 'GetRateAdjust' );
 		V.statuslast = V.statusget[ V.statusget.length - 1 ];
 		render.statusValue();
-		$( '#divconfiguration .name' ).html( 'Configuration'+ ( S.bluetooth ? ico( 'bluetooth' ) : '' ) );
+		if ( S.bluetooth ) {
+			if ( ! $( '#divconfiguration .col-l i' ).length ) $( '#divconfiguration a' ).after( ico( 'bluetooth' ) );
+		} else {
+			$( '#divconfiguration .col-l i' ).remove();
+		}
 		$( '#configuration' )
 			.html( htmlOption( S.lsconfigs ) )
 			.val( S.configname );
@@ -949,13 +967,13 @@ var setting  = {
 				$( '#infoContent tr' ).eq( 0 ).before( $tdname.parent() );
 				var $select     = $( '#infoContent select' );
 				var $selecttype = $select.eq( 0 );
-				$selecttype.on( 'change', function() {
+				$selecttype.on( 'input', function() {
 					var type    = $( this ).val();
 					var subtype = type in C.subtype ? C.subtype[ type ][ 0 ] : '';
 					setting.filter( type, subtype, '', infoVal().name );
 				} );
 				if ( $select.length > 1 ) {
-					$select.eq( 1 ).on( 'change', function() {
+					$select.eq( 1 ).on( 'input', function() {
 						var type    = $selecttype.val();
 						var subtype = $( this ).val();
 						setting.filter( type, subtype, '', infoVal().name );
@@ -966,7 +984,7 @@ var setting  = {
 					var itr    = $tr.index()
 					var $label = $tr.find( 'td' ).eq( 0 );
 					var $radio = $( '#infoContent input:radio' );
-					$radio.on( 'change', function() {
+					$radio.on( 'input', function() {
 						var val       = $( this ).filter( ':checked' ).val();
 						I.keys[ itr ] = val.toLowerCase();
 						$label.text( val );
@@ -1197,7 +1215,7 @@ var setting  = {
 			k           = Object.keys( kv );
 			k.forEach( key => {
 				if ( key === 'format' ) {
-					var s = jsonClone( C.format );
+					var s = jsonClone( dev === 'capture' ? C.format : S.format );
 					var v = { format: data.format };
 				} else if ( key === 'device' ) {
 					var s = jsonClone( C.devices[ dev ] );
@@ -1264,7 +1282,7 @@ var setting  = {
 				$( '#infoContent input[type=number]' ).css( 'width', '70px' );
 				$( '#infoContent td:first-child' ).css( 'width', '128px' );
 				var $select = $( '#infoContent select' );
-				$select.eq( 0 ).on( 'change', function() {
+				$select.eq( 0 ).on( 'input', function() {
 					setting.device( dev, $( this ).val() );
 				} );
 			}
@@ -1297,7 +1315,7 @@ var setting  = {
 				$( '.trselect' ).after( $( 'tr' ).last() );
 				var $trother = $( '.trtext' ).eq( 0 );
 				$trother.toggleClass( 'hide', values.samplerate !== 'Other' );
-				$( '.trselect select' ).on( 'change', function() {
+				$( '.trselect select' ).on( 'input', function() {
 					setting.hidetrinfo( $trother, $( this ).val() );
 				} );
 			}
@@ -1356,14 +1374,14 @@ var setting  = {
 				var indextr  = freeasync ? [ 2, 1, 0 ] : [ 0 ]
 				indextr.forEach( i => $( '.trselect' ).eq( 1 ).after( $trnumber.eq( i ) ) );
 				$trother.toggleClass( 'hide', values.capture_samplerate !== 'Other' );
-				$( '.trselect select' ).eq( 0 ).on( 'change', function() {
+				$( '.trselect select' ).eq( 0 ).on( 'input', function() {
 					if ( $( this ).val() === 'FreeAsync' ) {
 						setting.resampling( 'freeasync' );
 					} else if ( $trnumber.length > 1 ) {
 						setting.resampling();
 					}
 				} );
-				$( '.trselect select' ).eq( 1 ).on( 'change', function() {
+				$( '.trselect select' ).eq( 1 ).on( 'input', function() {
 					setting.hidetrinfo( $trother, $( this ).val() );
 				} );
 			}
@@ -1518,7 +1536,7 @@ var util     = {
 		return capitalized
 	}
 	, save2file    : () => {
-		bash( [ 'settings/camilla.py' ] );
+		bash( [ 'saveconfig' ] );
 	}
 	, volume       : ( pageX, type ) => {
 		var bandW   = $( '#volume .slide' ).width();
@@ -1797,7 +1815,7 @@ $( '#divstate' ).on( 'click', '.clipped', function() {
 	bash( [ 'clippedreset', S.clipped, 'CMD CLIPPED' ] );
 	render.status();
 } );
-$( '#configuration' ).on( 'change', function() {
+$( '#configuration' ).on( 'input', function() {
 	if ( V.local ) return
 	
 	var name = $( this ).val();
@@ -2149,7 +2167,7 @@ $( '#mixers' ).on( 'click', 'li', function( e ) {
 		}
 		setting.save( 'Mixer', 'Change ...' );
 	}
-} ).on( 'change', 'select', function() {
+} ).on( 'input', 'select', function() {
 	var $this = $( this );
 	V.li      = $this.parents( 'li' );
 	var name  = V.li.data( 'name' );

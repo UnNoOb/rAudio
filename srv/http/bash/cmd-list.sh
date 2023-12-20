@@ -10,6 +10,7 @@
 . /srv/http/bash/common.sh
 
 touch $dirmpd/listing $dirshm/listing # for debounce mpdidle.sh
+[[ -s $dirmpd/album && $( getContent $dirmpd/updating ) != rescan ]] && cp -f $dirmpd/album $dirshm/albumprev # for latest albums
 rm -f $dirmpd/updating
 
 modes='album albumbyartist-year latest albumartist artist composer conductor genre date'
@@ -24,10 +25,15 @@ updateDone() {
 }
 
 song=$( mpc stats | awk '/^Songs/ {print $NF}' )
+if [[ -e $dirdabradio ]]; then
+	dabradio=$( find -L $dirdabradio -type f ! -path '*/img/*' | wc -l )
+else
+	dabradio=0
+fi
 counts='
   "song"      : '$song'
 , "playlists" : '$( ls -1 $dirplaylists | wc -l )'
-, "dabradio"  : '$( [[ -e $dirdabradio ]] && find -L $dirdabradio -type f ! -path '*/img/*' | wc -l || echo 0 )'
+, "dabradio"  : '$dabradio'
 , "webradio"  : '$( find -L $dirwebradio -type f ! -path '*/img/*' | wc -l )
 if [[ $song == 0 ]]; then
 	for mode in "$modes albumbyartist"; do
@@ -43,9 +49,6 @@ for mode in NAS SD USB; do
 done
 
 ##### album
-# for latest albums
-[[ -s $dirmpd/album && $( getContent $dirmpd/updating ) != rescan ]] && cp -f $dirmpd/album $dirshm/albumprev
-
 albumList() {
 	mpclistall=$( mpc -f '%album%^^[%albumartist%|%artist%]^^%date%^^%file%' listall 2> /dev/null )        # include no album tag
 	[[ $mpclistall ]] && albumlist=$( awk -F'/[^/]*$' 'NF && !/^\^/ {print $1|"sort -u"}'<<< $mpclistall ) # exclude no album tag, strip filename, sort unique

@@ -4,6 +4,20 @@ alias=r1
 
 . /srv/http/bash/settings/addons.sh
 
+# 20231216
+if [[ ! -e /boot/kernel.img && $( pacman -Q python-websockets ) != 'python-websockets 12.0-1' ]]; then
+	pacman -Sy --needed --noconfirm python-websockets
+	systemctl restart websocket
+fi
+
+# 202312010
+file=$dirsystem/display.json
+for k in albumyear composername conductorname; do
+	! grep -q $k $file && sed -i '/"artist"/ i\  "'$k'": false,' $file
+done
+
+[[ ! -e /usr/bin/websocat ]] && pacman -Sy --noconfirm websocat
+
 # 20231125
 grep -q connect $dirbash/websocket-server.py && websocketrestart=1
 
@@ -74,37 +88,6 @@ runxinitrcd=
 ' $file
 fi
 
-# 20231001
-if [[ -e /usr/bin/upmpdcli ]]; then
-	! pacman -Q python-upnpp &> /dev/null && pacman -Sy --noconfirm python-upnpp
-	if grep -q ownqueue /etc/upmpdcli.conf; then
-		sed -i -e '/^ownqueue/ d
-' -e 's|^onstart.*|onstart = /usr/bin/sudo /srv/http/bash/cmd.sh upnpstart|
-' /etc/upmpdcli.conf
-		systemctl try-restart upmpdcli
-	fi
-fi
-
-file=$dirsystem/display.json
-if ! grep -q plclear $file; then
-	grep 'tapreplaceplay.*true' $file && plclear=false || plclear=true
-	sed -i '1 a\
-    "plclear": '$plclear',\
-    "plsimilar": true,\
-    "audiocdplclear": false,
-' $file
-fi
-
-if [[ ! -e /boot/kernel.img && ! -e $dirsystem/localbrowser.conf ]]; then
-	echo "\
-rotate=0
-zoom=100
-screenoff=0
-onwhileplay=
-cursor=
-runxinitrcd" > $dirsystem/localbrowser.conf
-fi
-
 #-------------------------------------------------------------------------------
 installstart "$1"
 
@@ -122,9 +105,3 @@ installfinish
 # 20231125
 [[ $websocketrestart ]] && systemctl restart websocket
 [[ $mpdrestart ]] && $dirsettings/player-conf.sh
-
-# 20231013
-if ! grep -q smbdfree /etc/samba/smb.conf; then
-	sed -i '/^.USB/ a\\tdfree command = /srv/http/bash/smbdfree.sh' /etc/samba/smb.conf
-	systemctl try-restart smb
-fi

@@ -106,11 +106,11 @@ function psBookmark() {
 function psCoverart( data ) {
 	clearTimeout( V.timeoutCover );
 	bannerHide();
-	$( '#coverart, #liimg' ).css( 'opacity', '' );
-	data.type === 'coverart' ? S.coverart = data.url : S.stationcover = data.url;
+	$( '#liimg' ).css( 'opacity', '' );
+	'stationcover' in data ? S.stationcover = data.url : S.coverart = data.url;
 	setCoverart();
-	if ( 'Album' in data ) { // online coverarts come with album name
-		S.Album = data.Album;
+	if ( data.radioalbum ) { // online coverarts come with album name
+		S.Album = data.radioalbum;
 		setInfo();
 	}
 	if ( V.library && data.url.slice( 0, 13 ) === '/data/audiocd' ) return
@@ -219,6 +219,8 @@ function psMpdRadio( data ) {
 function psMpdUpdate( data ) {
 	if ( 'type' in data ) {
 		data.type === 'mpd' ? S.updating_db = true : S.updatingdab = true;
+	} else if ( 'stop' in data ) {
+		S.updating_db = false;
 	} else if ( 'done' in data ) {
 		S.updating_db = false;
 		S.updatingdab = false;
@@ -272,9 +274,13 @@ function psOrder( data ) {
 	orderLibrary();
 }
 function psPlaylist( data ) {
-	if ( ! data.add
-		&& ( V.local || V.sortable || $( '.pl-remove' ).length )
-	) return
+	if ( V.local || V.sortable || $( '.pl-remove' ).length ) return
+	
+	if ( 'skip' in data ) {
+		S.song = data.skip;
+		if ( V.playlist ) setPlaylistScroll();
+		return
+	}
 	
 	clearTimeout( V.debouncepl );
 	V.debouncepl = setTimeout( () => {
@@ -285,9 +291,8 @@ function psPlaylist( data ) {
 		} else if ( 'autoplaycd' in data ) {
 			V.autoplaycd = true;
 			setTimeout( () => delete V.autoplaycd, 5000 );
-		} else if ( 'html' in data ) {
-			S.song = data.song;
-			if ( V.playlist && ! V.savedpl && ! V.savedpltrack ) renderPlaylist( data );
+		} else if ( 'refresh' in data ) {
+			if ( V.playlist && ! V.plhome ) playlistGet();
 		} else {
 			var name = $( '#pl-path .lipath' ).text();
 			if ( V.savedpltrack && data.playlist === name ) renderSavedPlTrack( name );

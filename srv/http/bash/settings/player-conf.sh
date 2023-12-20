@@ -21,6 +21,7 @@ pushStatus() {
 }
 
 rm -f $dirmpdconf/{bluetooth,camilladsp,fifo}.conf
+systemctl stop camilladsp
 
 # outputs -----------------------------------------------------------------------------
 if [[ $bluetooth && ! $camilladsp ]]; then # not require audio devices (from player-asound.sh)
@@ -49,7 +50,6 @@ if [[ $asoundcard == -1 ]]; then # no audio devices
 	if [[ $usbdac == remove ]]; then
 		pushData display '{ "volumenone": true }'
 		pushData refresh '{ "page": "features", "nosound": true }'
-		systemctl stop camilladsp &> /dev/null
 		outputswitch='(None)'
 	fi
 elif [[ ! $btoutputonly ]]; then # with devices (from player-devices.sh)
@@ -171,8 +171,8 @@ if [[ -e /usr/bin/spotifyd ]]; then # hw:N (or default:CARD=xxxx)
 		hw=plughw:Loopback,1
 	elif [[ $bluetooth ]]; then
 		hw=$( bluealsa-aplay -L | head -1 )  # bluealsa:SRV=org.bluealsa,DEV=xx:xx:xx:xx:xx:xx,PROFILE=a2dp
-	elif [[ -e "$dirsystem/spotify-$aplayname" ]]; then
-		hw=$( < "$dirsystem/spotify-$aplayname" )
+	elif [[ -e $dirsystem/spotifyoutput ]]; then
+		hw=$( < $dirsystem/spotifyoutput )
 	fi
 ########
 	conf=$( grep -Ev '^device|^control|^mixer' /etc/spotifyd.conf )
@@ -187,7 +187,5 @@ mixer = "'$hwmixer'"'
 	echo "$conf" > /etc/spotifyd.conf
 	systemctl try-restart spotifyd
 fi
-
-[[ $camilladsp ]] && systemctl start camilladsp
 
 pushStatus

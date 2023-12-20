@@ -4,7 +4,7 @@
 
 args2var "$1"
 
-if [[ $( < $dirshm/player ) == upnp ]]; then
+if playerActive upnp; then
 	upnp=1
 	name=$( tr -d ' "`?/#&'"'" <<< $ARTIST$ALBUM )
 	localfile=$dirshm/local/${name,,}
@@ -40,15 +40,10 @@ onlinefile=$( ls -1X $dirshm/online/${covername,,}.{jpg,png} 2> /dev/null | head
 [[ -f $onlinefile ]] && echo ${onlinefile:9} && exit
 
 ##### cover file
-if [[ $upnp ]]; then
-	coverfile=$( $dirbash/status-coverartupnp.py )
-else
-	coverfile=$( ls -1X "$path"/cover.{gif,jpg,png} 2> /dev/null | head -1 )
-	[[ ! $coverfile ]] && coverfile=$( ls -1X "$path"/*.{gif,jpg,png} 2> /dev/null | grep -E -i -m1 '/album\....$|cover\....$|/folder\....$|/front\....$' )
-fi
+[[ $upnp ]] && coverfile=$( $dirbash/status-coverartupnp.py ) || coverfile=$( coverFileGet "$path" )
 if [[ $coverfile ]]; then
 	echo "$coverfile" > $localfile
-	[[ $upnp ]] && echo "$coverfile" || php -r "echo rawurlencode( '${coverfile//\'/\\\'}' );"
+	[[ $upnp ]] && echo "$coverfile" || php -r "echo rawurlencode( '${coverfile//\'/\\\'}' );" # rawurlencode - preserve spaces
 	$dirbash/cmd.sh coverfileslimit
 	exit
 fi

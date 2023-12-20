@@ -7,19 +7,18 @@ echo $$ > $dirshm/pidstatuspush
 
 if [[ $1 == statusradio ]]; then # from status-radio.sh
 	state=play
+	playing=1
 else
 	status=$( $dirbash/status.sh )
-	statusnew=$( sed '/^, "counts"/,/}/ d' <<< $status \
-					| sed -E -n '/^, "Artist|^, "Album|^, "elapsed|^, "file| *"player|^, "station"|^, "state|^, "Time|^, "timestamp|^, "Title|^, "webradio"/ {
-						s/^,* *"//; s/" *: */=/; p
-						}' )
+	statusnew=$( sed -E -n '/^, "Artist|^, "Album|^, "Composer|^, "elapsed|^, "file| *"player|^, "station"|^, "state|^, "Time|^, "timestamp|^, "Title|^, "webradio"/ {s/^,* *"//; s/" *: */=/; p}' <<< $status )
 	echo "$statusnew" > $dirshm/statusnew
 	statusprev=$( < $dirshm/status )
 	compare='^Artist|^Title|^Album'
 	[[ "$( grep -E "$compare" <<< $statusnew | sort )" != "$( grep -E "$compare" <<< $statusprev | sort )" ]] && trackchanged=1
 	. <( echo "$statusnew" )
+	[[ $state == play ]] && playing=1
 	if [[ $webradio == true ]]; then
-		[[ ! $trackchanged && $state == play ]] && exit # >>>>>>>>>>
+		[[ ! $trackchanged && $playing ]] && exit # >>>>>>>>>>
 		
 	else
 		compare='^state|^elapsed'
@@ -39,7 +38,7 @@ fi
 if systemctl -q is-active localbrowser; then
 	if grep -q onwhileplay=true $dirsystem/localbrowser.conf; then
 		export DISPLAY=:0
-		[[ $state == play ]] && sudo xset -dpms || sudo xset +dpms
+		[[ $playing ]] && sudo xset -dpms || sudo xset +dpms
 	fi
 fi
 
@@ -51,7 +50,7 @@ if [[ -e $dirshm/clientip ]]; then
 	data='{ "channel": "mpdplayer", "data": { ${status:1} }'
 	clientip=$( < $dirshm/clientip )
 	for ip in $clientip; do
-		$dirbash/websocket-push.py "$data" $ip
+		ipOnline $ip && websocat ws://$ip:8080 <<< $( tr -d '\n' <<< $data )
 	done
 fi
 if [[ -e $dirsystem/lcdchar ]]; then
@@ -60,11 +59,12 @@ if [[ -e $dirsystem/lcdchar ]]; then
 fi
 
 if [[ -e $dirsystem/mpdoled ]]; then
-	[[ $state == play ]] && systemctl start mpd_oled || systemctl stop mpd_oled
+	[[ $playing ]] && start_stop=start || start_stop=stop
+	systemctl $start_stop mpd_oled
 fi
 
 [[ -e $dirsystem/vuled || -e $dirsystem/vumeter ]] && cava=1
-if [[ $state == play ]]; then
+if [[ $playing ]]; then
 	[[ $cava ]] && systemctl start cava
 else
 	[[ $cava ]] && systemctl stop cava
@@ -72,10 +72,6 @@ else
 fi
 
 [[ -e $dirsystem/librandom && $webradio == false ]] && $dirbash/cmd.sh mpclibrandom
-
-for p in player features camilla; do
-	pushData refresh '{ "page": "'$p'", "state": "'$state'" }'
-done
 
 [[ ! -e $dirsystem/scrobble ]] && exit
 

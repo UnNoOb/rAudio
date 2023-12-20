@@ -4,12 +4,6 @@
 
 args2var "$1"
 
-aplaynameFile() {
-	local aplayname card
-	card=$( head -1 /etc/asound.conf | cut -d' ' -f2 )
-	aplayname=$( aplay -l | sed -E -n '/^card '$card':/ {s/^.*\[(.*)],.*/\1/; p}' )
-	echo $dirsystem/spotify-$aplayname
-}
 localbrowserDisable() {
 	ply-image /srv/http/assets/img/splash.png
 	systemctl disable --now bootsplash localbrowser
@@ -52,7 +46,7 @@ brightness )
 	echo $VAL > /sys/class/backlight/rpi_backlight/brightness
 	;;
 camilladsp )
-	[[ $( < $dirshm/player ) == mpd ]] && mpc -q stop || $dirbash/cmd.sh playerstop
+	playerActive mpd && mpc -q stop || $dirbash/cmd.sh playerstop
 	enableFlagSet
 	if [[ $ON ]]; then
 		if grep -q configs-bt /etc/default/camilladsp && [[ ! -e $dirshm/btreceiver ]]; then
@@ -62,7 +56,7 @@ camilladsp )
 		pushRestartMpd camilladsp $TF
 		! systemctl -q is-active camilladsp && rm $dirsystem/camilladsp
 	else
-		$dirsettings/camilla.py
+		$dirsettings/camilla.sh saveconfig
 		[[ -e /etc/default/camilladsp.backup ]] && mv -f /etc/default/camilladsp{.backup,}
 		systemctl stop camilladsp
 		pushRestartMpd camilladsp $TF
@@ -190,7 +184,8 @@ localbrowser )
 		fi
 		if [[ $diffscreenoff ]]; then
 			localbrowserXset
-			[[ $SCREENOFF == 0 ]] && pushSubmenu screenoff false || pushSubmenu screenoff true
+			[[ $SCREENOFF == 0 ]] && tf=false || tf=true
+			pushSubmenu screenoff $tf
 		fi
 		if [[ $restart ]] || ! systemctl -q is-active localbrowser; then
 			restartlocalbrowser=1
@@ -335,7 +330,12 @@ shairport-sync | spotifyd | upmpdcli )
 	if [[ $ON ]]; then
 		serviceRestartEnable
 	else
-		[[ $( < $dirshm/player ) =~ (airplay|spotify|upnp) ]] && $dirbash/cmd.sh playerstop
+		case $CMD in
+			shairport-sync ) player=airplay;;
+			spotifyd )       player=spotify;;
+			upmpdcli )       player=upnp;;
+		esac
+		playerActive $player && $dirbash/cmd.sh playerstop
 		systemctl disable --now $CMD
 	fi
 	pushRefresh
@@ -402,7 +402,7 @@ spotifykeyremove )
 	pushRefresh
 	;;
 spotifyoutput )
-	file=$( aplaynameFile )
+	file=$dirsystem/spotifyoutput
 	[[ -e $file ]] && current='"'$( < "$file" )'"' || current=false
 	devices='"Default"'
 	readarray -t lines <<< $( aplay -L | grep ^.*:CARD )
@@ -417,7 +417,7 @@ spotifyoutput )
 }'
 	;;
 spotifyoutputset )
-	file=$( aplaynameFile )
+	file=$dirsystem/spotifyoutput
 	[[ $OUTPUT == Default ]] && rm -f "$file" || echo $OUTPUT > "$file"
 	$dirsettings/player-conf.sh
 	;;

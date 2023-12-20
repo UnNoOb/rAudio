@@ -222,7 +222,7 @@ $( '#setting-localbrowser' ).on( 'click', function() {
 				if ( ( up && zoom < 300 ) || ( ! up && zoom > 50 ) ) $( '#zoom' ).val( up ? zoom += 5 : zoom -= 5 );
 				$( '#infoOk' ).toggleClass( 'disabled', I.values.join( '' ) === infoVal( 'array' ).join( '' ) );
 			} );
-			$( '#infoContent' ).on( 'change', '#screenoff', function() {
+			$( '#infoContent' ).on( 'input', '#screenoff', function() {
 				if ( $( this ).val() != 0 ) {
 					$( '#onwhileplay' ).prop( 'disabled', 0 );
 				} else {
@@ -235,16 +235,12 @@ $( '#setting-localbrowser' ).on( 'click', function() {
 			$( '.brightness' ).on( 'click', function() {
 				switchCancel();
 				info( {
-					  icon       : 'firefox'
-					, title      : 'Browser on RPi'
-					, rangelabel : 'Brightness'
-					, values     : S.brightness
-					, beforeshow : () => {
-						$( '#infoRange input' ).on( 'input', function() {
-							bash( [ 'brightness', $( this ).val(), 'CMD VAL' ] );
-						} );
-					}
-					, okno       : true
+					  icon        : 'firefox'
+					, title       : 'Browser on RPi'
+					, rangelabel  : 'Brightness'
+					, values      : S.brightness
+					, rangechange : val => bash( [ 'brightness', val, 'CMD VAL' ] )
+					, okno        : true
 				} );
 			} );
 			$( '.reload' ).on( 'click', function() {

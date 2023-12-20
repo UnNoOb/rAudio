@@ -32,11 +32,10 @@ function addToPlaylistCommand() {
 	} else if ( [ 'mpcadd', 'mpcaddload' ].includes( mpccmd0 ) ) {
 		V.mpccmd.push( 'CMD FILE'+ varaction );
 	} else if ( mpccmd0 === 'mpcaddfind' ) {
-		if ( V.mpccmd.length < 5 ) {
-			V.mpccmd.push( 'CMD TYPE STRING'+ varaction );
-		} else {
-			V.mpccmd.push( 'CMD TYPE STRING TYPE2 STRING2'+ varaction );
-		}
+		var varlist = 'CMD MODE STRING';
+		if ( V.mpccmd.length > 3 ) varlist += ' MODE2 STRING2';
+		if ( V.mpccmd.length > 5 ) varlist += ' MODE3 STRING3';
+		V.mpccmd.push( varlist + varaction );
 	} else if ( mpccmd0 === 'mpcaddplaynext' ) {
 		V.mpccmd.push( 'CMD FILE' );
 	}
@@ -111,7 +110,10 @@ function bookmarkNew() {
 	} );
 }
 function currentSet() {
-	bash( [ 'mpcsetcurrent', V.list.index + 1, 'CMD POS' ] );
+	S.song = V.list.index;
+	setPlaylistScroll();
+	local();
+	bash( [ 'mpcskip', V.list.index + 1, 'CMD POS' ] );
 }
 function directoryList() {
 	if ( [ 'album', 'latest' ].includes( V.mode ) ) {
@@ -267,6 +269,11 @@ function similarAdd() {
 	}
 }
 function tagEditor() {
+	if ( S.updating_db ) {
+		infoUpdating();
+		return
+	}
+	
 	var name   = [ 'Album', 'AlbumArtist', 'Artist', 'Composer', 'Conductor', 'Genre', 'Date', 'Title', 'Track' ];
 	var format = name.map( el => el.toLowerCase() );
 	var file   = V.list.path;
@@ -426,8 +433,6 @@ function webRadioCoverart() {
 		var name      = V.list.name;
 	}
 	var imagefilenoext = '/srv/http/data/'+ mode +'/img/'+ url.replace( /\//g, '|' );
-	$( '#coverart' ).removeAttr( 'style' );
-	$( '.coveredit' ).remove();
 	info( {
 		  icon        : 'coverart'
 		, title       : ( mode === 'webradio' ? 'Web' : 'DAB' ) +' Radio Cover Art'
@@ -444,7 +449,7 @@ function webRadioCoverart() {
 		}
 		, buttonlabel : ico( mode ) +'Default'
 		, buttoncolor : orange
-		, button      : () => bash( [ 'webradiocoverreset', imagefilenoext, mode, 'CMD FILENOEXT MODE' ] )
+		, button      : () => bash( [ 'webradiocoverreset', imagefilenoext, 'CMD FILENOEXT' ] )
 		, ok          : () => imageReplace( mode, imagefilenoext )
 	} );
 }
@@ -699,13 +704,15 @@ $( '.contextmenu a, .contextmenu .submenu' ).on( 'click', function() {
 			if ( charset ) path += '#charset='+ charset
 			V.mpccmd = [ 'mpcadd', path ];
 			break;
-		default: // album albumartist artist composer conductor date genre
-			if ( ! V.list.name ) {
-				V.mpccmd = [ 'mpcaddfind', V.mode, path ];
-				if ( V.list.artist ) V.mpccmd.push( 'artist', V.list.artist );
-			} else {
-				V.mpccmd = [ 'mpcaddfind', V.mode, $( '#mode-title' ).text(), 'album', V.list.name ];
+		default: // MODE
+			if ( V.list.li.data( 'mode' ) !== 'album' ) { // 1st level
+				V.mpccmd = [ 'mpcaddfind', V.mode, V.list.path ];
+			} else {                        // next level: mode + album || date/genre: mode + artist + album
+				V.mpccmd = [ 'mpcaddfind', V.mode, $( '#lib-path .lipath' ).text() ];
+				if ( [ 'date', 'genre' ].includes( V.mode ) ) V.mpccmd.push( 'artist', V.list.li.find( '.name' ).text() );
+				V.mpccmd.push( 'album', V.list.li.find( '.liname' ).text() );
 			}
+		break
 	}
 	V.action = cmd.replace( /album|artist|composer|conductor|date|genre/g, '' ); // add addplay playnext replace replaceplay
 	addToPlaylist();

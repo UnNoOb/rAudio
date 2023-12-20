@@ -5,36 +5,15 @@ dirimg=/srv/http/assets/img
 
 args2var "$1"
 
-playerStart() {
-	local player service
-	player=$( < $dirshm/player )
-	mpc -q stop
-	radioStop
-	case $player in
-		airplay )   service=shairport-sync;;
-		bluetooth ) service=bluetoothhd;;
-		spotify )   service=spotifyd;;
-		upnp )      service=upmpdcli;;
-	esac
-	if [[ $service ]]; then
-		for pid in $( pgrep $service ); do
-			ionice -c 0 -n 0 -p $pid &> /dev/null 
-			renice -n -19 -p $pid &> /dev/null
-		done
-	fi
-	pushData player '{ "player": "'$player'", "active": true }'
-}
 plAddPlay() {
-	[[ ${ACTION: -4} == play ]] && mpc -q play $pos
-	pushPlaylist add
+	if [[ ${ACTION: -4} == play ]]; then
+		! playerActive mpd && playerStop
+		mpc -q play $1
+	fi
+	pushPlaylist
 }
 plAddPosition() {
-	if [[ ${ACTION:0:7} == replace ]]; then
-		plClear
-		pos=1
-	else
-		pos=$(( $( mpc status %length% ) + 1 ))
-	fi
+	[[ ${ACTION:0:7} == replace ]] && plClear || echo $(( $( mpc status %length% ) + 1 ))
 }
 plAddRandom() {
 	local cuefile diffcount dir file mpcls plL range tail
@@ -65,20 +44,65 @@ plAddRandom() {
 	fi
 	(( $tail > 1 )) || plAddRandom
 }
+playerStart() {
+	local player service
+	player=$( < $dirshm/player )
+	mpc -q stop
+	radioStop
+	case $player in
+		airplay )   service=shairport-sync;;
+		bluetooth ) service=bluetoothhd;;
+		spotify )   service=spotifyd;;
+		upnp )      service=upmpdcli;;
+	esac
+	if [[ $service ]]; then
+		for pid in $( pgrep $service ); do
+			ionice -c 0 -n 0 -p $pid &> /dev/null 
+			renice -n -19 -p $pid &> /dev/null
+		done
+	fi
+	pushData player '{ "player": "'$player'", "active": true }'
+}
+playerStop() {
+	local player
+	player=$( < $dirshm/player )
+	echo mpd > $dirshm/player
+	[[ -e $dirsystem/scrobble && $ELAPSED ]] && echo $ELAPSED > $dirshm/elapsed
+	$dirbash/status-push.sh
+	case $player in
+		airplay )
+			shairportStop
+			;;
+		bluetooth )
+			rm -f $dirshm/bluetoothdest
+			systemctl restart bluetooth
+			;;
+		snapcast )
+			$dirbash/snapcast.sh stop
+			;;
+		spotify )
+			rm -f $dirshm/spotify/start
+			systemctl restart spotifyd
+			;;
+		upnp )
+			systemctl restart upmpdcli
+			mpc -q clear
+			$dirbash/status-push.sh
+			;;
+	esac
+	pushData player '{ "player": "'$player'", "active": false }'
+}
 plClear() {
 	mpc -q clear
 	radioStop
 }
 plTail() {
-	local pos total
-	total=$( mpc status %length% )
-	pos=$( mpc status %songpos% )
-	echo $(( total - pos ))
+	local pos_len
+	pos_len=( $( mpc status '%songpos% %length%' ) )
+	echo $(( ${pos_len[1]} - ${pos_len[0]} ))
 }
 pushPlaylist() {
-	local arg
-	[[ $1 ]] && arg=$1 || arg=current
-	pushData playlist $( php /srv/http/mpdplaylist.php $arg )
+	pushData playlist '{ "refresh": true }'
 }
 pushRadioList() {
 	pushData radiolist '{ "type": "webradio" }'
@@ -91,7 +115,7 @@ radioStop() {
 		mpc -q stop
 		systemctl stop radio dab &> /dev/null
 		rm -f $dirshm/radio
-		$dirbash/status-push.sh
+		[[ ! -e $dirshm/skip ]] && $dirbash/status-push.sh
 	fi
 }
 shairportStop() {
@@ -125,7 +149,6 @@ volumeSet() {
 	if (( ${diff#-} < 5 )); then
 		volumeSetAt $target "$control" $card
 	else # increment
-		echo $target > $dirshm/volumeset
 		(( $diff > 0 )) && incr=5 || incr=-5
 		values=( $( seq $(( current + incr )) $incr $target ) )
 		(( $diff % 5 )) && values+=( $target )
@@ -133,9 +156,7 @@ volumeSet() {
 			volumeSetAt $i "$control" $card
 			sleep 0.2
 		done
-		rm $dirshm/volumeset
 	fi
-	[[ $control && ! -e $dirshm/btreceiver ]] && alsactl store
 }
 volumeSetAt() {
 	local card control target
@@ -159,16 +180,18 @@ webradioCount() {
 	grep -q -m1 "$type.*,"$ $dirmpd/counts && count+=,
 	sed -i -E 's/("'$type'": ).*/\1'$count'/' $dirmpd/counts
 }
-webradioPlaylistVerify() {
+webradioM3uPlsVerify() {
 	local ext url
-	ext=$1
-	url=$2
+	url=$1
+	ext=${url/*.}
+	[[ ! $ext =~ ^(m3u|pls)$ ]] && return
+	
 	if [[ $ext == m3u ]]; then
 		url=$( curl -s $url 2> /dev/null | grep -m1 ^http )
 	elif [[ $ext == pls ]]; then
 		url=$( curl -s $url 2> /dev/null | grep -m1 ^File | cut -d= -f2 )
 	fi
-	[[ ! $url ]] && echo 'No valid URL found in:' && exit
+	[[ ! $url ]] && echo 'No valid URL found in:'$url && exit
 }
 webRadioSampling() {
 	local bitrate data file kb rate sample samplerate url
@@ -200,9 +223,6 @@ albumignore )
 	sed -i "/\^$ARTIST^^$ALBUM^/ d" $dirmpd/albumbyartist
 	sed -i "/\^$ARTIST^^.*^^$ALBUM^/ d" $dirmpd/albumbyartist-year
 	echo $ALBUM^^$ARTIST >> $dirmpd/albumignore
-	;;
-booklet )
-	[[ -e "$FILE" ]] && echo $FILE
 	;;
 bookmarkadd )
 	bkfile="$dirbookmarks/${NAME//\//|}"
@@ -280,6 +300,13 @@ s|(path.*hsl).*;|\1(${hsg}75%);|
 	[[ -e $dirsystem/localbrowser.conf ]] && splashRotate
 	pushData reload 1
 	;;
+coverartonline )
+	$dirbash/status-coverartonline.sh "cmd
+$ARTIST
+$ALBUM
+debug
+CMD ARTIST ALBUM DEBUG"
+	;;
 coverartreset )
 	dir=$( dirname "$COVERFILE" )
 	filename=$( basename "$COVERFILE" )
@@ -300,6 +327,7 @@ CMD ARTIST ALBUM TYPE DISCID" &> /dev/null &
 	if [[ -e $backupfile ]]; then
 		restorefile=${backupfile:0:-7}
 		mv "$backupfile" "$restorefile"
+		pushDataCoverart "$restorefile"
 		if [[ ${restorefile: -3} != gif ]]; then
 			convert "$restorefile" -thumbnail 200x200\> -unsharp 0x.5 "$dir/coverart.jpg"
 			convert "$dir/coverart.jpg" -thumbnail 80x80\> -unsharp 0x.5 "$dir/thumb.jpg"
@@ -307,16 +335,14 @@ CMD ARTIST ALBUM TYPE DISCID" &> /dev/null &
 			gifsicle -O3 --resize-fit 200x200 "$restorefile" > "$dir/coverart.gif"
 			convert "$restorefile" -thumbnail 80x80\> -unsharp 0x.5 "$dir/thumb.jpg"
 		fi
-		pushData coverart '{ "url": "'$restorefile'", "type": "coverart" }'
-		exit
-	fi
+	else
 		url=$( $dirbash/status-coverart.sh "cmd
 $ARTIST
 $ALBUM
 $COVERFILE
 CMD ARTIST ALBUM FILE" )
-	[[ ! $url ]] && url=reset
-	pushData coverart '{ "url": "'$url'", "type": "coverart" }'
+		pushDataCoverart "$url"
+	fi
 	;;
 coverfileslimit )
 	for type in local online webradio; do
@@ -414,7 +440,7 @@ lyrics )
 		cat "$lyricsfile"
 	else
 		. $dirsystem/lyrics.conf
-		if [[ $embedded && $( < $dirshm/player ) == mpd ]]; then
+		if [[ $embedded ]] && playerActive mpd; then
 			file=$( getVar file $dirshm/status )
 			if [[ ${file/\/*} =~ ^(USB|NAS|SD)$ ]]; then
 				file="/mnt/MPD/$file"
@@ -431,31 +457,32 @@ lyrics )
 	fi
 	;;
 mpcadd )
-	plAddPosition
+	pos=$( plAddPosition )
 	mpc -q add "$FILE"
-	plAddPlay
+	plAddPlay $pos
 	;;
 mpcaddplaynext )
 	mpc -q insert "$FILE"
-	pushPlaylist add
+	pushPlaylist
 	;;
 mpcaddfind )
-	if [[ $TYPE2 ]]; then
-		plAddPosition
-		mpc -q findadd $TYPE "$STRING" $TYPE2 "$STRING2"
+	pos=$( plAddPosition )
+	if [[ $MODE3 ]]; then
+		mpc -q findadd $MODE "$STRING" $MODE2 "$STRING2" $MODE3 "$STRING3"
+	elif [[ $MODE2 ]]; then
+		mpc -q findadd $MODE "$STRING" $MODE2 "$STRING2"
 	else
-		plAddPosition
-		mpc -q findadd $TYPE "$STRING"
+		mpc -q findadd $MODE "$STRING"
 	fi
-	plAddPlay
+	plAddPlay $pos
 	;;
 mpcaddload )
-	plAddPosition
+	pos=$( plAddPosition )
 	mpc -q load "$FILE"
-	plAddPlay
+	plAddPlay $pos
 	;;
 mpcaddls )
-	plAddPosition
+	pos=$( plAddPosition )
 	readarray -t cuefiles <<< $( mpc ls "$DIR" | grep '\.cue$' | sort -u )
 	if [[ ! $cuefiles ]]; then
 		mpc ls "$DIR" | mpc -q add &> /dev/null
@@ -464,7 +491,7 @@ mpcaddls )
 			mpc -q load "$cuefile"
 		done
 	fi
-	plAddPlay
+	plAddPlay $pos
 	;;
 mpccrop )
 	if statePlay; then
@@ -492,11 +519,7 @@ mpcoption )
 	;;
 mpcplayback )
 	if [[ ! $ACTION ]]; then
-		player=$( < $dirshm/player )
-		if [[ $( < $dirshm/player ) != mpd ]]; then
-			$dirbash/cmd.sh playerstop
-			exit
-		fi
+		! playerActive mpd && $dirbash/cmd.sh playerstop && exit
 		
 		if statePlay; then
 			grep -q -m1 webradio=true $dirshm/status && ACTION=stop || ACTION=pause
@@ -507,7 +530,7 @@ mpcplayback )
 	radioStop
 	if [[ $ACTION == play ]]; then
 		[[ $( mpc status %state% ) == paused ]] && pause=1
-		mpc -q $ACTION $POS
+		mpc -q $ACTION
 		[[ $( mpc | head -c 4 ) == cdda && ! $pause ]] && notify 'audiocd blink' 'Audio CD' 'Start play ...'
 	else
 		[[ -e $dirsystem/scrobble && $ACTION == stop ]] && mpcElapsed > $dirshm/elapsed
@@ -529,33 +552,6 @@ mpcplayback )
 	pushData option '{ "snapclient": '$active' }'
 	pushData refresh '{ "page": "features", "snapclientactive": '$active' }'
 	;;
-mpcprevnext )
-	current=$( mpc status %songpos% )
-	length=$( mpc status %length% )
-	[[ $( mpc status %state% ) == playing ]] && playing=1
-	[[ -e $dirsystem/scrobble ]] && ! grep -q '^state="*stop' $dirshm/status && mpcElapsed > $dirshm/elapsed
-	radioStop
-	[[ ! $playing ]] && touch $dirshm/prevnextseek
-	if [[ $( mpc status %random% ) == on ]]; then
-		pos=$( shuf -n 1 <( seq $length | grep -v $current ) )
-		mpc -q play $pos
-	else
-		if [[ $ACTION == next ]]; then
-			(( $current != $length )) && mpc -q play $(( current + 1 )) || mpc -q play 1
-			[[ $( mpc status %consume% ) == on ]] && mpc -q del $current
-			[[ -e $dirsystem/librandom ]] && plAddRandom
-		else
-			(( $current != 1 )) && mpc -q play $(( current - 1 )) || mpc -q play $length
-		fi
-	fi
-	if [[ $playing ]]; then
-		mpc -q play
-		[[ $( mpc | head -c 4 ) == cdda ]] && notify 'audiocd blink' 'Audio CD' 'Change track ...'
-	else
-		rm -f $dirshm/prevnextseek
-		mpc -q stop
-	fi
-	;;
 mpcremove )
 	if [[ $POS ]]; then
 		[[ $( mpc status %songpos% ) == $POS ]] && radioStop
@@ -569,18 +565,12 @@ mpcremove )
 	;;
 mpcseek )
 	if [[ $STATE == stop ]]; then
-		touch $dirshm/prevnextseek
+		touch $dirshm/skip
 		mpc -q play
 		mpc -q pause
-		rm $dirshm/prevnextseek
+		rm $dirshm/skip
 	fi
 	mpc -q seek $ELAPSED
-	;;
-mpcsetcurrent )
-	mpc -q play $POS
-	mpc -q stop
-	pushPlaylist
-	$dirbash/status-push.sh
 	;;
 mpcshuffle )
 	mpc -q shuffle
@@ -616,6 +606,24 @@ mpcsimilar )
 	added=$(( $( mpc status %length% ) - plLprev ))
 	notify lastfm 'Add Similar' "$added tracks added."
 	;;
+mpcskip )
+	touch $dirshm/skip
+	. <( mpc status 'state=%state%; consume=%consume%' )
+	$dirbash/cmd-pskipdata.sh $POS &
+	if [[ $state == playing ]]; then
+		[[ $( mpc | head -c 4 ) == cdda ]] && notify 'audiocd blink' 'Audio CD' 'Change track ...'
+		[[ -e $dirsystem/scrobble ]] && mpcElapsed > $dirshm/elapsed
+		radioStop
+		rm -f $dirshm/skip
+		mpc -q play $POS
+		[[ $consume == on ]] && mpc -q del $current
+	else
+		mpc -q play $POS
+		rm -f $dirshm/skip
+		[[ ! $PLAY ]] && mpc -q stop
+	fi
+	[[ -e $dirsystem/librandom ]] && plAddRandom || pushData playlist '{ "skip": '$(( POS - 1 ))' }'
+	;;
 mpcupdate )
 	if [[ $DIR ]]; then
 		echo $DIR > $dirmpd/updating
@@ -623,8 +631,15 @@ mpcupdate )
 		DIR=$( < $dirmpd/updating )
 	fi
 	pushData mpdupdate '{ "type": "mpd" }'
-	mpc | grep -q ^Updating && systemctl restart mpd
 	[[ $DIR == rescan ]] && mpc -q rescan || mpc -q update "$DIR"
+	;;
+mpcupdatestop )
+	pushData mpdupdate '{ "stop": true }'
+	systemctl restart mpd
+	if [[ -e $dirmpd/listing ]]; then
+		killall cmd-list.sh
+		rm -f $dirmpd/{listing,updating} $dirshm/{listing,tageditor}
+	fi
 	;;
 multiraudiolist )
 	echo '{
@@ -639,32 +654,7 @@ playerstart )
 	playerStart
 	;;
 playerstop )
-	player=$( < $dirshm/player )
-	echo mpd > $dirshm/player
-	[[ -e $dirsystem/scrobble ]] && echo $ELAPSED > $dirshm/elapsed
-	$dirbash/status-push.sh
-	case $player in
-		airplay )
-			shairportStop
-			;;
-		bluetooth )
-			rm -f $dirshm/bluetoothdest
-			systemctl restart bluetooth
-			;;
-		snapcast )
-			$dirbash/snapcast.sh stop
-			;;
-		spotify )
-			rm -f $dirshm/spotify/start
-			systemctl restart spotifyd
-			;;
-		upnp )
-			systemctl restart upmpdcli
-			mpc -q clear
-			$dirbash/status-push.sh
-			;;
-	esac
-	pushData player '{ "player": "'$player'", "active": false }'
+	playerStop
 	;;
 playlist )
 	[[ $REPLACE ]] && plClear
@@ -690,7 +680,7 @@ savedpledit ) # $DATA: remove - file, add - position-file, move - from-to
 	elif [[ $TYPE == add ]]; then
 		[[ $TO == last ]] && echo $FILE >> "$plfile" || sed -i "$TO i$FILE" "$plfile"
 	else # move
-		file=$( sed -n "$FROM p" "$plfile" )
+		file=$( sed "$FROM q;d" "$plfile" )
 		[[ $FROM < $TO ]] && (( TO++ ))
 		sed -i -e "$FROM d" -e "$TO i$file" "$plfile"
 	fi
@@ -727,7 +717,7 @@ screenoff )
 	DISPLAY=:0 xset dpms force off
 	;;
 shairport )
-	[[ $( < $dirshm/player ) != airplay ]] && echo airplay > $dirshm/player && playerStart
+	! playerActive airplay && echo airplay > $dirshm/player && playerStart
 	systemctl start shairport
 	$dirbash/status-push.sh
 	;;
@@ -777,9 +767,7 @@ volumeupdnmpc )
 webradioadd )
 	url=$( urldecode $URL )
 	urlname=${url//\//|}
-	ext=${url/*.}
-	[[ $ext == m3u || $ext == pls ]] && webradioPlaylistVerify $ext $url
-	
+	webradioM3uPlsVerify $url
 	file=$dirwebradio
 	[[ $DIR ]] && file+="/$DIR"
 	file+="/$urlname"
@@ -794,7 +782,7 @@ $CHARSET" > "$file"
 	;;
 webradiocoverreset )
 	rm "$FILENOEXT".* "$FILENOEXT-thumb".*
-	pushData coverart '{ "url": "", "type": "'$MODE'" }'
+	pushDataCoverart
 	;;
 webradiodelete )
 	urlname=${URL//\//|}
@@ -812,13 +800,11 @@ webradioedit )
 	newfile="$path/$newurlname"
 	prevfile="$path/$urlname"
 	if [[ $NEWURL == $URL ]]; then
-		sampling=$( sed -n 2p "$prevfile" )
+		sampling=$( sed '2q;d' "$prevfile" )
 	else
 		[[ -e $newfile ]] && echo 'URL exists:' && exit
 		
-		ext=${NEWURL##*.}
-		[[ $ext == m3u || $ext == pls ]] && webradioPlaylistVerify $ext $NEWURL
-		
+		webradioM3uPlsVerify $NEWURL
 		rm "$prevfile"
 		# stationcover
 		imgurl="$dirwebradio/img/$urlname"

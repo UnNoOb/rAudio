@@ -109,6 +109,7 @@ V.consolelog - press: $( '#infoOk' ) / $( '.switch' )
 		console.log( data );
 		console.log( bashcmd );
 		if ( V.consoleonly ) {
+			V.consoleonly = false;
 			setTimeout( () => page ? switchCancel() : bannerHide(), 5000 );
 			return
 		}
@@ -122,6 +123,7 @@ V.consolelog - press: $( '#infoOk' ) / $( '.switch' )
 	);
 }
 // debug
+$( '.page-icon' ).press( () => location.reload() );
 $( '#debug' ).press( function() {
 	V.debug = true;
 	banner( 'gear', 'Debug', 'Console.log + Push status', 5000 );
@@ -241,19 +243,19 @@ select:   [U] [D]     - check
 */
 	if ( ! I.active ) return
 	
+	e.stopPropagation(); // suppress others
 	var key = e.key;
 	switch ( key ) {
 		case 'Enter':
 			if ( ! $( '#infoOk' ).hasClass( 'disabled' ) && ! $( 'textarea' ).is( ':focus' ) ) $( '#infoOk' ).trigger( 'click' );
 			break;
 		case 'Escape':
-			local(); // prevent toggle setting menu
 			$( '#infoX' ).trigger( 'click' );
 			break;
 		case 'ArrowLeft':
 		case 'ArrowRight':
 			var activeinput = $( document.activeElement ).attr( 'type' );
-			if ( [ 'text', 'password', 'textarea' ].includes( activeinput ) ) return
+			if ( [ 'text', 'number', 'password', 'range', 'textarea' ].includes( activeinput ) ) return
 			
 			var $tabactive = $( '#infoTab a.active' );
 			if ( key === 'ArrowLeft' ) {
@@ -441,7 +443,7 @@ function info( json ) {
 		if ( I.passwordlabel ) {
 			infoKey2array( 'passwordlabel' );
 			htmls.password      = '';
-			I.passwordlabel.forEach( lbl => htmls.password += '<tr class="trpassword"><td>'+ lbl +'</td><td><input type="password"></td></tr>' );
+			I.passwordlabel.forEach( lbl => htmls.password += '<tr class="trpassword"><td>'+ lbl +'</td><td><input type="password"></td><td>'+ ico( 'eye' ) +'</td></tr>' );
 		}
 		if ( I.textarea ) {
 			htmls.textarea = '<textarea></textarea>';
@@ -530,7 +532,7 @@ function info( json ) {
 			I.rangelabel.forEach( range => {
 				htmls.range += '<div class="name">'+ I.rangelabel +'</div>'
 							  +'<div class="value gr"></div>'
-							  +'<a class="min">0</a><input type="range" min="0" max="100"><a class="max">100</a>'
+							  + ico( 'minus dn' ) +'<input type="range" min="0" max="100">'+ ico( 'plus' )
 							  + ( I.rangesub ? '<div class="sub gr">'+ I.rangesub +'</div>' : '' )
 			} );
 			htmls.range += '</div>';
@@ -552,6 +554,7 @@ function info( json ) {
 		$( '#infoOverlay' ).removeClass( 'hide' );
 		$( '#infoBox' ).css( 'margin-top', $( window ).scrollTop() );
 		infoButtonWidth();
+		$( '#infoOverlay' ).focus();
 		return
 	}
 	
@@ -591,17 +594,10 @@ function info( json ) {
 		infoButtonWidth();
 		// set width: text / password / textarea
 		infoWidth();
-		if ( I.rangelabel ) {
-			$( '#infoRange input' ).on( 'click input keyup', function() {
-				$( '#infoRange .value' ).text( $( this ).val() );
-			} );
-		}
-		if ( I.tab && $input.length === 1 ) $( '#infoContent' ).css( 'padding', '30px' );
-		// custom function before show
-		$( '#infoContent input:password' ).parent().after( '<td>'+ ico( 'eye' ) +'</td>' );
 		if ( [ 'localhost', '127.0.0.1' ].includes( location.hostname ) ) $( '#infoContent a' ).removeAttr( 'href' );
 		// set at current scroll position
 		$( '#infoBox' ).css( 'margin-top', $( window ).scrollTop() );
+		if ( I.tab && $input.length === 1 ) $( '#infoContent' ).css( 'padding', '30px' );
 		// check inputs: blank / length / change
 		if ( I.checkblank ) {
 			if ( I.checkblank === true ) I.checkblank = [ ...Array( $inputbox.length ).keys() ];
@@ -620,6 +616,38 @@ function info( json ) {
 		I.nochange = I.values && I.checkchanged ? true : false;
 		$( '#infoOk' ).toggleClass( 'disabled', I.blank || I.notip || I.short || I.nochange ); // initial check
 		infoCheckSet();
+		if ( I.rangelabel ) {
+			var $range   = $( '#infoRange input' );
+			var timeout, val;
+			$range.on( 'input', function() { // drag/click
+				val = +$range.val();
+				$( '#infoRange .value' ).text( val );
+				if ( I.rangechange ) I.rangechange( val );
+			} ).on( 'touchend mouseup keyup', function() { // drag stop
+				if ( I.rangestop ) setTimeout( () => I.rangestop( val ), 300 );
+			} );
+			$( '#infoRange i' ).on( 'mouseup keyup', function() { // increment up/dn
+				clearTimeout( timeout );
+				if ( ! V.press ) {
+					val = +$range.val();
+					$( this ).hasClass( 'dn' ) ? val-- : val++;
+					$range
+						.val( val )
+						.trigger( 'input' );
+				}
+				if ( I.rangestop ) timeout = setTimeout( () => I.rangestop( val ), 600 );
+			} ).press( function( e ) {
+				val = +$range.val();
+				var up  = $( e.target ).hasClass( 'dn' )
+				timeout = setInterval( () => {
+					up ? val-- : val++;
+					$range
+						.val( val )
+						.trigger( 'input' );
+				}, 100 );
+			} );
+		}
+		// custom function before show
 		if ( I.beforeshow ) I.beforeshow();
 	} );
 	$( '#infoContent .i-eye' ).on( 'click', function() {
@@ -689,25 +717,15 @@ function infoCheckLength() {
 	} );
 }
 function infoCheckSet() {
-	if ( I.checkblank || I.checkip || I.checklength || I.checkchanged ) {
-		$inputbox.on( 'keyup paste cut', function() {
+	if ( I.checkchanged || I.checkblank || I.checkip || I.checklength ) {
+		$( '#infoContent' ).find( 'input, select, textarea' ).on( 'input', function() {
+			if ( I.checkchanged ) I.nochange = I.values.join( '' ) === infoVal( 'array' ).join( '' );
 			if ( I.checkblank ) setTimeout( infoCheckBlank, 0 ); // ios: wait for value
 			if ( I.checklength ) setTimeout( infoCheckLength, 25 );
 			if ( I.checkip ) setTimeout( infoCheckIP, 50 );
-			if ( I.checkchanged ) {
-				var values  = infoVal( 'array' );
-				I.nochange  = I.values.join( '' ) === values.join( '' );
-			}
 			setTimeout( () => {
-				$( '#infoOk' ).toggleClass( 'disabled', I.blank || I.notip || I.short || I.nochange )
+				$( '#infoOk' ).toggleClass( 'disabled', I.nochange || I.blank || I.notip || I.short )
 			}, 75 ); // ios: force after infoCheckLength
-		} );
-	}
-	if ( I.checkchanged ) {
-		$( '#infoContent' ).find( 'input:radio, input:checkbox, select' ).on( 'change', function() {
-			var values = infoVal( 'array' );
-			I.nochange = I.values.join( '' ) === values.join( '' );
-			$( '#infoOk' ).toggleClass( 'disabled', I.nochange );
 		} );
 	}
 }
@@ -921,9 +939,11 @@ function infoPower() {
 	} );
 }
 function infoPowerCommand( action ) {
+	loader();
 	bash( [ 'power.sh', action ], nfs => {
 		if ( nfs != -1 ) return
 		
+		loaderHide();
 		var off = action === 'off';
 		info( {
 			  icon    : 'power'
@@ -935,7 +955,7 @@ function infoPowerCommand( action ) {
 			, oklabel : off ? ico( 'power' ) +'Off' : ico( 'reboot' ) +'Reboot'
 			, okcolor : off ? red : orange
 			, ok      : () => {
-				bash( [ 'power.sh', action, 1  ] );
+				bash( [ 'power.sh', action, 'confirm' ] );
 				banner( 'rserver', 'Server rAudio', 'Notify clients ...', -1 );
 			}
 		} );
@@ -1099,45 +1119,47 @@ window.onpageshow = pageActive;
 
 // websocket
 var ws, wsvolume;
-function volumeSet( vol, type ) {
-	if ( ! type ) volumePush( vol );
-	wsvolume.send( [ 'volume', S.volume, vol, S.control, S.card, 'CMD CURRENT TARGET CONTROL CARD' ].join( '\n' ) );
-}
-function volumeSetAt() { // drag / press / updn
-	wsvolume.send( [ 'volumesetat', S.volume, S.control, S.card, 'CMD TARGET CONTROL CARD' ].join( '\n' ) );
+function volumeMuteToggle() {
+	S.volumemute ? volumePush( S.volumemute, 'unmute' ) : volumePush( S.volume, 'mute' );
+	volumeSet( S.volumemute, 'toggle' );
 }
 function volumePush( vol, type ) {
 	local();
 	wsPush( 'volume', '{ "type": "'+ ( type || 'push' ) +'", "val": '+ ( vol || S.volume ) +' }' );
 }
-function volumeMuteToggle() {
-	S.volumemute ? volumePush( S.volumemute, 'unmute' ) : volumePush( S.volume, 'mute' );
-	volumeSet( S.volumemute, 'toggle' );
+function volumeSet( vol, type ) {
+	if ( ! type ) volumePush( vol );
+	wsvolume.send( [ 'volume', S.volume, vol, S.control, S.card, 'CMD CURRENT TARGET CONTROL CARD' ].join( '\n' ) );
 }
-function websocketConnect( reboot ) {
-	if ( ! page || page === 'camilla' ) {
-		if ( ! wsvolume || wsvolume.readyState !== 1 ) wsvolume = new WebSocket( 'ws://'+ window.location.host +':8080/volume' );
+function volumeSetAt( val ) { // drag / press / updn
+	wsvolume.send( [ 'volumesetat', val || S.volume, S.control, S.card, 'CMD TARGET CONTROL CARD' ].join( '\n' ) );
+}
+function websocketConnect() {
+	if ( [ '', 'camilla', 'player' ].includes( page ) ) {
+		if ( ! websocketOk( wsvolume ) ) wsvolume = new WebSocket( 'ws://'+ window.location.host +':8080/volume' );
 	}
-	if ( ws && ws.readyState === 1 ) return
+	if ( websocketOk( ws ) ) return
 	
 	ws           = new WebSocket( 'ws://'+ window.location.host +':8080' );
-	ws.onready   = () => { // custom
-		ws.send( 'clientadd' );
-		if ( ! reboot ) return
-		
-		if ( S.login ) {
-			location.href = '/';
-		} else {
-			refreshData();
-			loaderHide();
-			bannerHide();
-		}
-	}
-	ws.onopen    = () => {
-		websocketReady( ws );
-	}
+	ws.onopen    = () => websocketReady( ws );
 	ws.onclose   = () => ws = null;
 	ws.onmessage = message => psOnMessage( message ); // data pushed from server
+	ws.onready   = () => { // custom
+		ws.send( 'clientadd' );
+		if ( V.reboot ) {
+			delete V.reboot
+			if ( S.login ) {
+				location.href = '/';
+			} else {
+				refreshData();
+				loaderHide();
+				bannerHide();
+			}
+		}
+	}
+}
+function websocketOk( socket ) {
+	return socket !== null && typeof socket === 'object' && socket.readyState === 1
 }
 function websocketReady( socket ) {
 	var interval = setTimeout( () => {
@@ -1147,11 +1169,22 @@ function websocketReady( socket ) {
 		}
 	}, 100 );
 }
+function websocketReconnect() {
+	fetch( '/data/shm/startup' )
+		.then( response => {
+			response.ok ? websocketConnect() : setTimeout( websocketReconnect, 1000 );
+		} );
+}
 function wsPush( channel, data ) {
 	ws.send( '{ "channel": "'+ channel +'", "data": '+ data +' }' );
 }
 // push status
 function psNotify( data ) {
+	if ( data === false ) {
+		bannerHide();
+		return
+	}
+	
 	var icon    = data.icon;
 	var title   = data.title;
 	var message = data.message;
@@ -1169,8 +1202,10 @@ function psNotify( data ) {
 }
 function psPower( data ) {
 	loader();
-	V.off = data.type === 'off';
+	V[ data.type ] = true;
 	banner( data.type +' blink', 'Power', V.off ? 'Off ...' : 'Reboot ...', -1 );
+	ws.close();
+	if ( typeof wsvolume === 'object' ) wsvolume.close();
 	if ( V.off ) {
 		$( '#loader' ).css( 'background', '#000000' );
 		setTimeout( () => {
@@ -1178,8 +1213,6 @@ function psPower( data ) {
 			bannerHide();
 		}, 10000 );
 	} else { // reconnect after reboot
-		setTimeout( () => {
-			websocketConnect( 'reboot' );
-		}, data.wait * 1000 );
+		setTimeout( websocketReconnect, data.startup + 5000 ); // add shutdown 5s
 	}
 }
